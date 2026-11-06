@@ -2,11 +2,11 @@ import socket
 import json
 import threading
 
-class Client:
+class Client:#test
     def __init__(self, host='127.0.0.1', port=6767):
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.connect((host, port))
-        self.lock = threading.Lock()
+        self.lock = threading.Lock() 
         self.working = True
 
     def sendData(self, data_str):
