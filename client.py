@@ -2,7 +2,7 @@ import socket
 import json
 import threading
 
-class Client:#test
+class Client:
     def __init__(self, host='127.0.0.1', port=6767):
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.connect((host, port))
