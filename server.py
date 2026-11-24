@@ -3,8 +3,9 @@ import json
 import base
 import threading
 
+
 class Server:
-    def __init__(self, host='127.0.0.1', port=6767):
+    def __init__(self, host='0.0.0.0', port=6767):
         self.host = host
         self.port = port
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -57,7 +58,7 @@ class Server:
 
                         if inquiry_type == 6:  # פקודות DB
                             self.data_base(data_dec, client_socket)
-                        elif inquiry_type == 7:  # העברת נתונים בחדר משותף (ציור, צ'אט, וידאו)
+                        elif inquiry_type == 7:  # העברת נתונים בחדר משותף (ציור, צ'אט, וידאו, קול)
                             self.handle_room_broadcast(data_dec, client_socket)
                     except Exception as ex:
                         print("JSON parse error:", ex)
@@ -110,6 +111,7 @@ class Server:
             param = parameters[0] if isinstance(parameters, list) else parameters
             res = base.get_usernames_users(param)
             response = json.dumps({"answer": res}) + "\n"
+            # send all pics to client
             client_socket.sendall(response.encode('utf-8'))
 
         elif issue == "get_hash_and_salt_users":
@@ -142,7 +144,6 @@ class Server:
                     client_count = len(self.rooms[room_key])
 
                 res = base.join_pair_room(username, category, pic_num)
-
                 is_pair_ready = client_count >= 2
 
                 response = json.dumps({"answer": is_pair_ready}) + "\n"
@@ -215,7 +216,7 @@ class Server:
                     pass
 
     def handle_room_broadcast(self, data, sender_socket):
-        """שידור הודעה (ציור, צ'אט, מצלמה) לכל שאר המשתתפים בחדר"""
+        """שידור הודעה (ציור, צ'אט, מצלמה, קול) לכל שאר המשתתפים בחדר"""
         category = data.get("category")
         pic_num = data.get("pictureNumber")
         try:
@@ -248,3 +249,13 @@ class Server:
             self.server_socket.close()
         except:
             pass
+
+if __name__ == '__main__':
+    s = Server()
+    print("Server running on port 6767. Press Ctrl+C to stop.")
+    try:
+        import time
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        s.end()

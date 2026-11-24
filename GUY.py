@@ -1,3 +1,4 @@
+# IMPORT 
 import os
 import tkinter as tk
 import secrets
@@ -13,6 +14,14 @@ import cv2
 import base64
 import numpy as np
 import threading
+import queue
+
+try:
+    import pyaudio
+    AUDIO_AVAILABLE = True
+except ImportError:
+    pyaudio = None
+    AUDIO_AVAILABLE = False
 
 def server_push_data(namePunc, parameters):
     try:
@@ -498,6 +507,33 @@ class pageTowDraw(standartPage, DrawingTools):
         self.current_image = None
         self.partner_image = None
 
+        # הגדרות שיחת קול (Voice Audio Call)
+        self.is_mic_muted = False
+        self.audio_running = False
+        self.audio_stream_out = None
+        self.pa = None
+        self.audio_queue = queue.Queue()
+
+        if AUDIO_AVAILABLE:
+            try:
+                self.pa = pyaudio.PyAudio()
+                self.audio_stream_out = self.pa.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=16000,
+                    output=True,
+                    frames_per_buffer=1024
+                )
+                threading.Thread(target=self.play_audio_loop, daemon=True).start()
+            except Exception as e:
+                print("Error initializing audio output:", e)
+        else:
+            print("Note: PyAudio is not installed. Run: pip install pyaudio")
+
+        # כפתור השתקה / הפעלת מיקרופון
+        self.buttonMic = tk.Button(self.root, text="🎤 MIC ON", command=self.toggle_mic, bg="#22c55e", fg="#ffffff", activebackground="#22c55e", font=("Arial", 10, "bold"), borderwidth=0)
+        self.buttonMic.place(relx=0.745, rely=0.203, relwidth=0.11, relheight=0.038)
+
         # התחלת האזנה לתקשורת מהשרת והצטרפות לחדר
         if self.net_client:
             threading.Thread(target=self.listen_to_partner, daemon=True).start()
@@ -520,15 +556,92 @@ class pageTowDraw(standartPage, DrawingTools):
             self.net_client.send_only(json.dumps(packet) + "\n")
             self.root.after(3000, self.send_join_room)
 
+    def toggle_mic(self):
+        self.is_mic_muted = not self.is_mic_muted
+        if self.is_mic_muted:
+            self.buttonMic.configure(text="🔇 MUTED", bg="#e63946", activebackground="#e63946")
+        else:
+            self.buttonMic.configure(text="🎤 MIC ON", bg="#22c55e", activebackground="#22c55e")
+
+    def start_audio_capture(self):
+        if not AUDIO_AVAILABLE or not self.pa or self.audio_running:
+            return
+        self.audio_running = True
+        threading.Thread(target=self.record_and_send_audio, daemon=True).start()
+
+    def record_and_send_audio(self):
+        input_stream = None
+        try:
+            input_stream = self.pa.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=16000,
+                input=True,
+                frames_per_buffer=1024
+            )
+            while self.is_running and self.audio_running and self.partner_connected:
+                try:
+                    data = input_stream.read(1024, exception_on_overflow=False)
+                    if data and self.net_client and not self.is_mic_muted:
+                        b64_audio = base64.b64encode(data).decode('utf-8')
+                        packet = {
+                            "Type of inquiry": 7,
+                            "action": "audio",
+                            "category": self.category,
+                            "pictureNumber": self.pictureNumber,
+                            "data": b64_audio
+                        }
+                        self.net_client.send_only(json.dumps(packet) + "\n")
+                except Exception:
+                    pass
+        except Exception as e:
+            print("Error in audio capture:", e)
+        finally:
+            if input_stream:
+                try:
+                    input_stream.stop_stream()
+                    input_stream.close()
+                except Exception:
+                    pass
+
+    def play_audio_loop(self):
+        while self.is_running:
+            try:
+                pcm_data = self.audio_queue.get(timeout=0.2)
+                if self.audio_stream_out and pcm_data:
+                    self.audio_stream_out.write(pcm_data)
+            except queue.Empty:
+                continue
+            except Exception:
+                pass
+
+    def cleanup_audio(self):
+        self.audio_running = False
+        if self.audio_stream_out:
+            try:
+                self.audio_stream_out.stop_stream()
+                self.audio_stream_out.close()
+            except Exception:
+                pass
+            self.audio_stream_out = None
+        if self.pa:
+            try:
+                self.pa.terminate()
+            except Exception:
+                pass
+            self.pa = None
+
     def unlock_drawing(self):
         if self.partner_connected:
             return
         self.partner_connected = True
         self.videoLabel2.configure(text="Partner Connected", bg="green")
         self.loadCanvasBackground()
+        self.start_audio_capture()
 
     def lock_drawing(self):
         self.partner_connected = False
+        self.audio_running = False
         self.videoLabel2.configure(image="", text="Waiting Partner...", bg="black")
         self.send_join_room()
 
@@ -593,7 +706,7 @@ class pageTowDraw(standartPage, DrawingTools):
                 
                 self.current_image = ImageTk.PhotoImage(image=Image.fromarray(frame_rgb), master=self.root)
                 self.videoLabel1.configure(image=self.current_image, text="")
-                frame_to_send = frame
+                frame_to_send = cv2.resize(frame, (160, 130))
         else:
             try:
                 sim_frame = np.zeros((130, 160, 3), dtype=np.uint8)
@@ -627,8 +740,11 @@ class pageTowDraw(standartPage, DrawingTools):
 
     def show_partner_frame(self, pil_img):
         try:
+            # רזולוציה אחידה של 160x130 ורקע שחור - בדיוק כמו בחלון המצלמה הראשונה (videoLabel1)
+            resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC)
+            pil_img = pil_img.resize((160, 130), resampling)
             self.partner_image = ImageTk.PhotoImage(image=pil_img, master=self.root)
-            self.videoLabel2.configure(image=self.partner_image, text="")
+            self.videoLabel2.configure(image=self.partner_image, text="", bg="black")
         except Exception:
             pass
 
@@ -671,6 +787,16 @@ class pageTowDraw(standartPage, DrawingTools):
                             self.root.after(0, lambda x=x, y=y, r=r, c=color: 
                                 self.drawingCanvas.create_oval(x - r, y - r, x + r, y + r, fill=c, outline=c))
 
+                    elif action == "audio":
+                        raw_audio = packet.get("data")
+                        if raw_audio:
+                            try:
+                                pcm_bytes = base64.b64decode(raw_audio)
+                                if self.audio_queue.qsize() < 10:
+                                    self.audio_queue.put(pcm_bytes)
+                            except Exception:
+                                pass
+
                     elif action == "chat":
                         sender = packet.get("sender", "Partner")
                         msg = packet.get("message", "")
@@ -685,6 +811,7 @@ class pageTowDraw(standartPage, DrawingTools):
                                 decoded_frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                                 if decoded_frame is not None:
                                     decoded_frame = cv2.cvtColor(decoded_frame, cv2.COLOR_BGR2RGB)
+                                    decoded_frame = cv2.resize(decoded_frame, (160, 130))
                                     pil_img = Image.fromarray(decoded_frame)
                                     self.root.after(0, lambda img=pil_img: self.show_partner_frame(img))
                             except Exception:
@@ -695,6 +822,7 @@ class pageTowDraw(standartPage, DrawingTools):
 
     def on_closing(self):
         self.is_running = False
+        self.cleanup_audio()
         if self.cap and self.cap.isOpened():
             try:
                 self.cap.release()
@@ -718,6 +846,7 @@ class pageTowDraw(standartPage, DrawingTools):
 
     def back(self):
         self.is_running = False
+        self.cleanup_audio()
         if self.cap and self.cap.isOpened():
             try:
                 self.cap.release()

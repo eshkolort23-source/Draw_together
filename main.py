@@ -24,7 +24,7 @@ if __name__ == '__main__':
     t3 = threading.Thread(target=newPlayer)
     t3.start()
 
-    # המתנה קצרה והפעלת שחקן 2
-    time.sleep(0.3)
-    t4 = threading.Thread(target=newPlayer1)
-    t4.start()
+    # # המתנה קצרה והפעלת שחקן 2
+    # time.sleep(0.3)
+    # t4 = threading.Thread(target=newPlayer1)
+    # t4.start()

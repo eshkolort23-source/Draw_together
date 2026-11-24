@@ -2,6 +2,7 @@ import socket
 import json
 import threading
 
+
 class Client:
     def __init__(self, host='127.0.0.1', port=6767):
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -15,7 +16,7 @@ class Client:
         return self.recv()
 
     def send_only(self, data_str):
-        """שליחת נתונים בלבד מבלי לחכות לתשובה (מתאים לצ'אט, ציור ומצלמה)"""
+        """שליחת נתונים בלבד מבלי לחכות לתשובה (מתאים לצ'אט, ציור, מצלמה ושמע)"""
         with self.lock:
             try:
                 self.client_socket.sendall(data_str.encode('utf-8'))
